@@ -1,238 +1,334 @@
-#define FUSE_USE_VERSION 30
-
-#include <fuse.h>
+#define FUSE_USE_VERSION 31
+#include <fuse3/fuse.h>
+#include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <dirent.h>
 #include <pwd.h>
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-#include <openssl/buffer.h>
+#include <dirent.h>
+#include <stdlib.h>
 
-static const char *target_path = "task-2/target";
+#define TARGET_DIR "task-2/target"
+static const char base64_table[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-static int is_owner(const char *path) {
-    char full_path[1024];
-    struct stat st;
+// Function to get the username based on UID
+char *get_user_name(uid_t uid) {
+    struct passwd *pw = getpwuid(uid);
+    if (pw) {
+        return pw->pw_name;
+    } else {
+        return "unknown"; // Handle cases where getpwuid fails
+    }
+}
 
-    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
-    if (stat(full_path, &st) == -1) {
-        return 0;
+// Function to check if the user has access to the target directory
+int has_access(const char *username, const char *path) {
+    char target_dir[PATH_MAX];
+    snprintf(target_dir, PATH_MAX, "%s/%s", TARGET_DIR, username);
+    return strstr(path, target_dir) != NULL;
+}
+
+// Base64 encoding function
+char *base64_encode(const unsigned char *data, size_t input_length) {
+    char *encoded_data;
+    size_t output_length = 4 * ((input_length + 2) / 3);
+    encoded_data = malloc(output_length + 1);
+    if (encoded_data == NULL) return NULL;
+
+    for (size_t i = 0, j = 0; i < input_length;) {
+        uint32_t octet_a = i < input_length ? (unsigned char)data[i++] : 0;
+        uint32_t octet_b = i < input_length ? (unsigned char)data[i++] : 0;
+        uint32_t octet_c = i < input_length ? (unsigned char)data[i++] : 0;
+
+        uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
+
+        encoded_data[j++] = base64_table[(triple >> 3 * 6) & 0x3F];
+        encoded_data[j++] = base64_table[(triple >> 2 * 6) & 0x3F];
+        encoded_data[j++] = base64_table[(triple >> 1 * 6) & 0x3F];
+        encoded_data[j++] = base64_table[(triple >> 0 * 6) & 0x3F];
     }
 
-    uid_t uid = getuid();
-    return st.st_uid == uid;
+    // Pad the output with '=' characters if necessary
+    for (size_t i = 0; i < (3 - input_length % 3) % 3; i++) {
+        encoded_data[output_length - 1 - i] = '=';
+    }
+    encoded_data[output_length] = '\0';
+
+    return encoded_data;
 }
 
-static char* base64_encode(const char* input, int length) {
-    BIO *bmem, *b64;
-    BUF_MEM *bptr;
-    char *buff;
+// Base64 decoding function
+unsigned char *base64_decode(const char *data, size_t input_length, size_t *output_length) {
+    if (input_length % 4 != 0) return NULL;
 
-    b64 = BIO_new(BIO_f_base64());
-    bmem = BIO_new(BIO_s_mem());
-    b64 = BIO_push(b64, bmem);
-    BIO_write(b64, input, length);
-    BIO_flush(b64);
-    BIO_get_mem_ptr(b64, &bptr);
+    *output_length = input_length / 4 * 3;
+    if (data[input_length - 1] == '=') (*output_length)--;
+    if (data[input_length - 2] == '=') (*output_length)--;
 
-    buff = (char *)malloc(bptr->length + 1);
-    memcpy(buff, bptr->data, bptr->length);
-    buff[bptr->length] = 0;
+    unsigned char *decoded_data = malloc(*output_length);
+    if (decoded_data == NULL) return NULL;
 
-    BIO_free_all(b64);
+    for (size_t i = 0, j = 0; i < input_length;) {
+        uint32_t sextet_a = data[i] == '=' ? 0 & i++ : base64_table[strchr(base64_table, data[i++]) - base64_table];
+        uint32_t sextet_b = data[i] == '=' ? 0 & i++ : base64_table[strchr(base64_table, data[i++]) - base64_table];
+        uint32_t sextet_c = data[i] == '=' ? 0 & i++ : base64_table[strchr(base64_table, data[i++]) - base64_table];
+        uint32_t sextet_d = data[i] == '=' ? 0 & i++ : base64_table[strchr(base64_table, data[i++]) - base64_table];
 
-    return buff;
+        uint32_t triple = (sextet_a << 3 * 6) + (sextet_b << 2 * 6) + (sextet_c << 1 * 6) + (sextet_d << 0 * 6);
+
+        if (j < *output_length) decoded_data[j++] = (triple >> 2 * 8) & 0xFF;
+        if (j < *output_length) decoded_data[j++] = (triple >> 1 * 8) & 0xFF;
+        if (j < *output_length) decoded_data[j++] = (triple >> 0 * 8) & 0xFF;
+    }
+
+    return decoded_data;
 }
 
-static char* base64_decode(const char* input, int length, int* out_length) {
-    BIO *b64, *bmem;
-    char *buffer = (char *)malloc(length);
-    memset(buffer, 0, length);
-
-    b64 = BIO_new(BIO_f_base64());
-    bmem = BIO_new_mem_buf(input, length);
-    bmem = BIO_push(b64, bmem);
-    *out_length = BIO_read(bmem, buffer, length);
-
-    BIO_free_all(bmem);
-
-    return buffer;
+// Function to construct the full path by appending the target directory
+void construct_full_path(const char *path, char *full_path) {
+    snprintf(full_path, PATH_MAX, "%s%s", TARGET_DIR, path);
 }
 
-static int fuse_example_getattr(const char *path, struct stat *stbuf) {
+// FUSE callback to read file attributes
+static int fuse_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi) {
+    (void)fi;
     int res = 0;
-    char full_path[1024];
+    memset(stbuf, 0, sizeof(struct stat));
 
-    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
     res = lstat(full_path, stbuf);
-
     if (res == -1)
         return -errno;
 
     return 0;
 }
 
-static int fuse_example_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
-    DIR *dp;
-    struct dirent *de;
-    char full_path[1024];
+// FUSE callback to read directory contents
+static int fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags) {
+    (void) offset;
+    (void) fi;
+    (void) flags;
 
-    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
-    dp = opendir(full_path);
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    DIR *dp = opendir(full_path);
     if (dp == NULL)
         return -errno;
 
-    filler(buf, ".", NULL, 0);
-    filler(buf, "..", NULL, 0);
+    struct dirent *de;
     while ((de = readdir(dp)) != NULL) {
+        if (de->d_name[0] == '.')
+            continue;
+
         struct stat st;
         memset(&st, 0, sizeof(st));
         st.st_ino = de->d_ino;
         st.st_mode = de->d_type << 12;
-        if (filler(buf, de->d_name, &st, 0))
-            break;
+        filler(buf, de->d_name, &st, 0, 0);
     }
 
     closedir(dp);
     return 0;
 }
 
-static int fuse_example_open(const char *path, struct fuse_file_info *fi) {
-    int res;
-    char full_path[1024];
+// FUSE callback to create a directory
+static int fuse_mkdir(const char *path, mode_t mode) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
 
-    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
-    res = open(full_path, fi->flags);
+    if (!has_access(username, path))
+        return -EACCES;
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    int res = mkdir(full_path, mode);
     if (res == -1)
         return -errno;
 
-    close(res);
     return 0;
 }
 
-static int fuse_example_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-    int fd;
-    int res;
-    char full_path[1024];
-    char *file_buf = (char *)malloc(size);
+// FUSE callback to remove a directory
+static int fuse_rmdir(const char *path) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
 
-    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
-    fd = open(full_path, O_RDONLY);
+    if (!has_access(username, path))
+        return -EACCES;
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    int res = rmdir(full_path);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+// FUSE callback to create a file
+static int fuse_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    if (!has_access(username, path))
+        return -EACCES;
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    int fd = open(full_path, fi->flags, mode);
     if (fd == -1)
         return -errno;
 
-    res = pread(fd, file_buf, size, offset);
-    if (res == -1) {
-        res = -errno;
-    } else {
-        if (is_owner(path)) {
-            int decoded_len;
-            char *decoded_buf = base64_decode(file_buf, res, &decoded_len);
-            memcpy(buf, decoded_buf, decoded_len);
-            res = decoded_len;
-            free(decoded_buf);
-        } else {
-            char *encoded_buf = base64_encode(file_buf, res);
-            int encoded_len = strlen(encoded_buf);
-            memcpy(buf, encoded_buf, encoded_len);
-            res = encoded_len;
-            free(encoded_buf);
+    fi->fh = fd;
+    return 0;
+}
+
+// FUSE callback to remove a file
+static int fuse_unlink(const char *path) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    if (!has_access(username, path))
+        return -EACCES;
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    int res = unlink(full_path);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+// FUSE callback to rename a file or directory
+static int fuse_rename(const char *oldpath, const char *newpath, unsigned int flags) {
+    (void) flags;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    if (!has_access(username, oldpath) || !has_access(username, newpath))
+        return -EACCES;
+
+    char full_oldpath[PATH_MAX];
+    char full_newpath[PATH_MAX];
+    construct_full_path(oldpath, full_oldpath);
+    construct_full_path(newpath, full_newpath);
+
+    int res = rename(full_oldpath, full_newpath);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+// FUSE callback to open a file
+static int fuse_open(const char *path, struct fuse_file_info *fi) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    if (!has_access(username, path))
+        return -EACCES;
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    int fd = open(full_path, fi->flags);
+    if (fd == -1)
+        return -errno;
+
+    fi->fh = fd;
+    return 0;
+}
+
+// FUSE callback to read data from a file
+static int fuse_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    int fd = fi->fh;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    ssize_t res = pread(fd, buf, size, offset);
+    if (res == -1)
+        return -errno;
+
+    // If the user is not the owner, encode the data with Base64
+    if (!has_access(username, path)) {
+        char *encoded_data = base64_encode((unsigned char *)buf, res);
+        if (encoded_data) {
+            memcpy(buf, encoded_data, strlen(encoded_data));
+            free(encoded_data);
+            res = strlen(encoded_data); // Update the result size to encoded data size
         }
     }
 
-    free(file_buf);
-    close(fd);
     return res;
 }
 
-static int fuse_example_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-    int fd;
-    int res;
-    char full_path[1024];
-    char *encoded_buf = NULL;
+// FUSE callback to release (close) a file
+static int fuse_release(const char *path, struct fuse_file_info *fi) {
+    close(fi->fh);
+    return 0;
+}
 
-    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
-    fd = open(full_path, O_WRONLY);
-    if (fd == -1)
+// FUSE callback to write data to a file
+static int fuse_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    int fd = fi->fh;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    if (!has_access(username, path))
+        return -EACCES;
+
+    ssize_t res = pwrite(fd, buf, size, offset);
+    if (res == -1)
         return -errno;
 
-    if (is_owner(path)) {
-        int encoded_len;
-        encoded_buf = base64_decode(buf, size, &encoded_len);
-        res = pwrite(fd, encoded_buf, encoded_len, offset);
-        free(encoded_buf);
-    } else {
-        res = pwrite(fd, buf, size, offset);
-    }
-
-    if (res == -1)
-        res = -errno;
-
-    close(fd);
     return res;
 }
 
-static int fuse_example_mkdir(const char *path, mode_t mode) {
-    if (!is_owner(path)) {
-        return -EACCES;
-    }
+// FUSE callback to truncate (resize) a file
+static int fuse_truncate(const char *path, off_t size, struct fuse_file_info *fi) {
+    (void)fi;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
 
-    char full_path[1024];
-    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
-    return mkdir(full_path, mode);
+    if (!has_access(username, path))
+        return -EACCES;
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    int res = truncate(full_path, size);
+    if (res == -1)
+        return -errno;
+
+    return 0;
 }
 
-static int fuse_example_rmdir(const char *path) {
-    if (!is_owner(path)) {
-        return -EACCES;
-    }
-
-    char full_path[1024];
-    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
-    return rmdir(full_path);
-}
-
-static int fuse_example_unlink(const char *path) {
-    if (!is_owner(path)) {
-        return -EACCES;
-    }
-
-    char full_path[1024];
-    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
-    return unlink(full_path);
-}
-
-static int fuse_example_rename(const char *from, const char *to) {
-    if (!is_owner(from) || !is_owner(to)) {
-        return -EACCES;
-    }
-
-    char full_from[1024];
-    char full_to[1024];
-    snprintf(full_from, sizeof(full_from), "%s%s", target_path, from);
-    snprintf(full_to, sizeof(full_to), "%s%s", target_path, to);
-    return rename(full_from, full_to);
-}
-
-static struct fuse_operations fuse_example_oper = {
-    .getattr = fuse_example_getattr,
-    .readdir = fuse_example_readdir,
-    .open = fuse_example_open,
-    .read = fuse_example_read,
-    .write = fuse_example_write,
-    .mkdir = fuse_example_mkdir,
-    .rmdir = fuse_example_rmdir,
-    .unlink = fuse_example_unlink,
-    .rename = fuse_example_rename,
+static struct fuse_operations fuse_oper = {
+    .getattr = fuse_getattr,
+    .readdir = fuse_readdir,
+    .open = fuse_open,
+    .read = fuse_read,
+    .release = fuse_release,
+    .write = fuse_write,
+    .truncate = fuse_truncate,
+    .create = fuse_create,
+    .mkdir = fuse_mkdir,
+    .rmdir = fuse_rmdir,
+    .unlink = fuse_unlink,
+    .rename = fuse_rename,
 };
 
 int main(int argc, char *argv[]) {
-    return fuse_main(argc, argv, &fuse_example_oper, NULL);
+    return fuse_main(argc, argv, &fuse_oper, NULL);
 }
