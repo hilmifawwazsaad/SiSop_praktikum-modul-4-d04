@@ -1,11 +1,21 @@
 #include "std_lib.h"
 
 int div(int a, int b) {
-    return a / b;
+    // div untuk OS yang tidak memiliki fungsi pembagian
+    int quotient = 0;
+    while (a >= b) {
+        a -= b;
+        quotient++;
+    }
+    return quotient;
 }
 
 int mod(int a, int b) {
-    return a % b;
+    // mod untuk OS yang tidak memiliki fungsi modulus
+    while (a >= b) {
+        a -= b;
+    }
+    return a;
 }
 
 void memcpy(byte* src, byte* dst, unsigned int size) {

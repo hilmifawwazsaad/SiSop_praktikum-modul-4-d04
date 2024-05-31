@@ -45,7 +45,7 @@ void readString(char* buf) {
 
         // Jika Caps Lock aktif, ubah huruf menjadi huruf kapital
         if (capsLock && input >= 'a' && input <= 'z') {
-            input += 32; // Ubah ke huruf kapital
+            input -= 32; // Ubah ke huruf kapital
         }
 
         if (input == '\r') { // Jika tombol Enter ditekan
