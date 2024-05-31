@@ -139,7 +139,7 @@ Setelah itu, install `alien` (untuk mengkonversi paket-paket perangkat lunak ant
 ```bash
 sudo apt install alien rpm
 ```
-Setelah menginstall `alien` dan `rpm`, selanjutnya melakukan download bochs dengan ekstensi file `.rpm`. Bochs bisa didownload pada link [ini] (https://sourceforge.net/projects/bochs/files/bochs/2.8/). Pastikan Anda mendownload bochs yang bernama `bochs-2.8-1.x86_64.rpm`
+Setelah menginstall `alien` dan `rpm`, selanjutnya melakukan download bochs dengan ekstensi file `.rpm`. Bochs bisa didownload pada link https://sourceforge.net/projects/bochs/files/bochs/2.8/. Pastikan Anda mendownload bochs yang bernama `bochs-2.8-1.x86_64.rpm`
 
 Setelah download file selesai, pindahkan file tersebut ke tempat yang bisa diakses oleh terminal Linux/WSL/Ubuntu Anda. Anda bisa membuat directory `bochs` untuk menyimpan file `bochs-2.8-1.x86_64.rpm` tersebut. Jika sudah, install paket `.rpm` tersebut pada sistem Linux.
 ```bash
@@ -412,19 +412,28 @@ clean:
 
 *2. Dokumentasi*
 - Make build
+
 ![alt text](/resource/3e-1.png)
+
 - Make run
+
 ![alt text](/resource/3e-2.png)
+
 - Tampilan GUI, clearScreen, readString, dan printString
+
 ![alt text](/resource/3e-3.png)
+
 - Before Delete
+
 ![alt text](/resource/3e-4.png)
+
 - After Delete
-![alt text](/resource/3e-15.png)
+
+![alt text](/resource/3e-5.png)
 
 ### Kendala
 
-[Jawab Disini]
+Sejauh ini tidak menemukan kendala untuk nomor 3
 
 <div align=center>
 
