@@ -11,7 +11,7 @@
 #include <dirent.h>
 #include <stdlib.h>
 
-#define TARGET_DIR "task-2/target"
+#define TARGET_DIR "/usr/operating-system/praktikum-modul-4-d04/task-2/target"
 static const char base64_table[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 // Function to get the username based on UID
@@ -28,7 +28,7 @@ char *get_user_name(uid_t uid) {
 int has_access(const char *username, const char *path) {
     char target_dir[PATH_MAX];
     snprintf(target_dir, PATH_MAX, "%s/%s", TARGET_DIR, username);
-    return strstr(path, target_dir) != NULL;
+    return strstr(path, target_dir) == path;
 }
 
 // Base64 encoding function
@@ -142,11 +142,11 @@ static int fuse_mkdir(const char *path, mode_t mode) {
     struct fuse_context *ctx = fuse_get_context();
     char *username = get_user_name(ctx->uid);
 
-    if (!has_access(username, path))
-        return -EACCES;
-
     char full_path[PATH_MAX];
     construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
 
     int res = mkdir(full_path, mode);
     if (res == -1)
@@ -160,11 +160,11 @@ static int fuse_rmdir(const char *path) {
     struct fuse_context *ctx = fuse_get_context();
     char *username = get_user_name(ctx->uid);
 
-    if (!has_access(username, path))
-        return -EACCES;
-
     char full_path[PATH_MAX];
     construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
 
     int res = rmdir(full_path);
     if (res == -1)
@@ -178,11 +178,11 @@ static int fuse_create(const char *path, mode_t mode, struct fuse_file_info *fi)
     struct fuse_context *ctx = fuse_get_context();
     char *username = get_user_name(ctx->uid);
 
-    if (!has_access(username, path))
-        return -EACCES;
-
     char full_path[PATH_MAX];
     construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
 
     int fd = open(full_path, fi->flags, mode);
     if (fd == -1)
@@ -197,11 +197,11 @@ static int fuse_unlink(const char *path) {
     struct fuse_context *ctx = fuse_get_context();
     char *username = get_user_name(ctx->uid);
 
-    if (!has_access(username, path))
-        return -EACCES;
-
     char full_path[PATH_MAX];
     construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
 
     int res = unlink(full_path);
     if (res == -1)
@@ -216,13 +216,13 @@ static int fuse_rename(const char *oldpath, const char *newpath, unsigned int fl
     struct fuse_context *ctx = fuse_get_context();
     char *username = get_user_name(ctx->uid);
 
-    if (!has_access(username, oldpath) || !has_access(username, newpath))
-        return -EACCES;
-
     char full_oldpath[PATH_MAX];
     char full_newpath[PATH_MAX];
     construct_full_path(oldpath, full_oldpath);
     construct_full_path(newpath, full_newpath);
+
+    if (!has_access(username, full_oldpath) || !has_access(username, full_newpath))
+        return -EACCES;
 
     int res = rename(full_oldpath, full_newpath);
     if (res == -1)
@@ -236,11 +236,11 @@ static int fuse_open(const char *path, struct fuse_file_info *fi) {
     struct fuse_context *ctx = fuse_get_context();
     char *username = get_user_name(ctx->uid);
 
-    if (!has_access(username, path))
-        return -EACCES;
-
     char full_path[PATH_MAX];
     construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
 
     int fd = open(full_path, fi->flags);
     if (fd == -1)
@@ -261,7 +261,9 @@ static int fuse_read(const char *path, char *buf, size_t size, off_t offset, str
         return -errno;
 
     // If the user is not the owner, encode the data with Base64
-    if (!has_access(username, path)) {
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+    if (!has_access(username, full_path)) {
         char *encoded_data = base64_encode((unsigned char *)buf, res);
         if (encoded_data) {
             memcpy(buf, encoded_data, strlen(encoded_data));
@@ -285,7 +287,10 @@ static int fuse_write(const char *path, const char *buf, size_t size, off_t offs
     struct fuse_context *ctx = fuse_get_context();
     char *username = get_user_name(ctx->uid);
 
-    if (!has_access(username, path))
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
         return -EACCES;
 
     ssize_t res = pwrite(fd, buf, size, offset);
@@ -301,11 +306,11 @@ static int fuse_truncate(const char *path, off_t size, struct fuse_file_info *fi
     struct fuse_context *ctx = fuse_get_context();
     char *username = get_user_name(ctx->uid);
 
-    if (!has_access(username, path))
-        return -EACCES;
-
     char full_path[PATH_MAX];
     construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
 
     int res = truncate(full_path, size);
     if (res == -1)
