@@ -295,6 +295,26 @@ int main(int argc, char *argv[])
 
 ```
 
+*1. Compile the filesystem*
+
+```bash
+gcc -Wall trash.c `pkg-config fuse --cflags --libs` -o trash_fs
+```
+*2. Create and Mount the Filesystem*
+
+```bash
+mkdir /path/to/mountpoint
+mkdir /path/to/trash
+./trash_fs /path/to/mountpoint
+```
+
+*3. Test the Filesystem*
+
+Create some test files and directories in the mounted filesystem.
+Use rm and rmdir to delete files and directories inside and outside the trash directory.
+Verify that files and directories outside the trash directory are moved to the trash and have their permissions changed.
+Verify that files and directories inside the trash directory are permanently deleted.
+
 ### Problem 1c
 File atau direktori yang berada pada direktori trash tidak dapat diubah permission dan kepemilikannya, serta tidak dapat direname
 
@@ -455,12 +475,214 @@ int main(int argc, char *argv[])
 }
 ```
 
+*1. Compile the filesystem*
+
+```bash
+gcc -Wall trash.c `pkg-config fuse --cflags --libs` -o trash_fs
+```
+*2. Create and Mount the Filesystem*
+
+```bash
+mkdir /path/to/mountpoint
+mkdir /path/to/trash
+./trash_fs /path/to/mountpoint
+```
+
+*3. Test the Filesystem*
+
+Create some test files and directories in the mounted filesystem.
+Use rm and rmdir to delete files and directories inside and outside the trash directory.
+Try renaming, changing permissions, and changing ownership of files and directories within the trash directory to ensure these operations are not permitted.
+Verify that files and directories outside the trash directory are moved to the trash and have their permissions changed.
+Verify that files and directories inside the trash directory are permanently deleted.
+
 ### Problem 1d
 Untuk memulihkan file atau direktori dari direktori trash, anda harus menggunakan perintah mv dengan format mv [path_file_dalam_trash] [arg]. Opsi pertama untuk arg adalah dengan path biasa sehingga file atau direktori akan dipindahkan dari direktori trash ke path tersebut. Opsi kedua untuk arg adalah restore sehingga file atau direktori akan kembali ke path asal sebelum ia dipindah ke trash. Permission untuk file atau direktori yang dipulihkan harus kembali seperti sebelum dimasukkan ke trash. Khusus untuk arg restore anda harus membuat path yang sesuai apabila path asal tidak ada (terhapus/dipindah)
 
 **Jawab**
 
-[Jawab Disini]
+*1. Define a structure to store metadata*
+
+```C
+#define FUSE_USE_VERSION 30
+
+#include <fuse.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#include <stdlib.h>
+#include <dirent.h>
+```
+
+*2. Utility function to write metadata*
+
+```C
+static int write_metadata(const char *path, const char *original_path, mode_t mode, uid_t uid, gid_t gid) {
+    char metadata_path[1024];
+    snprintf(metadata_path, sizeof(metadata_path), "%s.metadata", path);
+
+    FILE *fp = fopen(metadata_path, "w");
+    if (!fp)
+        return -errno;
+
+    fprintf(fp, "path=%s\nmode=%o\nuid=%d\ngid=%d\n", original_path, mode, uid, gid);
+    fclose(fp);
+    return 0;
+}
+```
+*3. Utility function to read metadata*
+
+```C
+static int read_metadata(const char *path, char *original_path, mode_t *mode, uid_t *uid, gid_t *gid) {
+    char metadata_path[1024];
+    snprintf(metadata_path, sizeof(metadata_path), "%s.metadata", path);
+
+    FILE *fp = fopen(metadata_path, "r");
+    if (!fp)
+        return -errno;
+
+    fscanf(fp, "path=%s\nmode=%o\nuid=%d\ngid=%d\n", original_path, mode, uid, gid);
+    fclose(fp);
+    return 0;
+}
+```
+
+*4. Update unlink and rmdir operations to save metadata*
+
+```C
+static int xmp_unlink(const char *path) {
+    int res;
+
+    if (is_in_trash(path)) {
+        res = unlink(path);
+        if (res == -1)
+            return -errno;
+    } else {
+        char new_path[1024];
+        snprintf(new_path, sizeof(new_path), "%s%s", trash_path, path);
+
+        struct stat st;
+        if (lstat(path, &st) == -1)
+            return -errno;
+
+        res = rename(path, new_path);
+        if (res == -1)
+            return -errno;
+
+        chmod(new_path, 0000); // Make the file unreadable, unwritable, unexecutable
+
+        write_metadata(new_path, path, st.st_mode, st.st_uid, st.st_gid);
+    }
+
+    return 0;
+}
+
+static int xmp_rmdir(const char *path) {
+    int res;
+
+    if (is_in_trash(path)) {
+        res = rmdir(path);
+        if (res == -1)
+            return -errno;
+    } else {
+        char new_path[1024];
+        snprintf(new_path, sizeof(new_path), "%s%s", trash_path, path);
+
+        struct stat st;
+        if (lstat(path, &st) == -1)
+            return -errno;
+
+        res = rename(path, new_path);
+        if (res == -1)
+            return -errno;
+
+        chmod(new_path, 0000); // Make the directory unreadable, unwritable, unexecutable
+
+        write_metadata(new_path, path, st.st_mode, st.st_uid, st.st_gid);
+    }
+
+    return 0;
+}
+```
+
+*5. Implement restore functionality*
+
+```C
+static int xmp_rename(const char *from, const char *to, unsigned int flags) {
+    if (is_in_trash(from)) {
+        if (strcmp(to, "restore") == 0) {
+            char original_path[1024];
+            mode_t mode;
+            uid_t uid;
+            gid_t gid;
+
+            if (read_metadata(from, original_path, &mode, &uid, &gid) == -1)
+                return -errno;
+
+            if (rename(from, original_path) == -1)
+                return -errno;
+
+            if (chmod(original_path, mode) == -1)
+                return -errno;
+
+            if (chown(original_path, uid, gid) == -1)
+                return -errno;
+
+            char metadata_path[1024];
+            snprintf(metadata_path, sizeof(metadata_path), "%s.metadata", from);
+            unlink(metadata_path); // Remove metadata file
+
+            return 0;
+        }
+    }
+
+    return rename(from, to);
+}
+```
+
+*6. Mount the filesystem with FUSE operations*
+
+```C
+static struct fuse_operations xmp_oper = {
+    .getattr = xmp_getattr,
+    .readdir = xmp_readdir,
+    .read = xmp_read,
+    .unlink = xmp_unlink,
+    .rmdir = xmp_rmdir,
+    .rename = xmp_rename,
+    .chmod = xmp_chmod,
+    .chown = xmp_chown,
+};
+
+int main(int argc, char *argv[]) {
+    return fuse_main(argc, argv, &xmp_oper, NULL);
+}
+```
+
+*1. Compile the filesystem*
+
+```bash
+gcc -Wall trash.c `pkg-config fuse --cflags --libs` -o trash_fs
+```
+*2. Create and Mount the Filesystem*
+
+```bash
+mkdir /path/to/mountpoint
+mkdir /path/to/trash
+./trash_fs /path/to/mountpoint
+```
+
+*3. Test the Filesystem*
+
+Create some test files and directories in the mounted filesystem.
+Use rm and rmdir to delete files and directories inside and outside the trash directory.
+Use the mv command to test restoring files and directories from the trash directory.
+Verify that files and directories are restored to their original paths and permissions.
 
 ### Problem 1e
 Direktori trash tidak dapat dihapus, dipindah, direname. Anda juga tidak dapat membuat direktori dengan nama trash atau restore
