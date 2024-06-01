@@ -689,18 +689,248 @@ Direktori trash tidak dapat dihapus, dipindah, direname. Anda juga tidak dapat m
 
 **Jawab**
 
-[Jawab Disini]
+*1. Prevent the trash directory from being deleted, moved, or renamed*
+Fungsi `xmp_unlink`, `xmp_rmdir`, dan `xmp_rename` memeriksa apakah path yang dimaksud adalah `trash_path`.
+Jika ya, menulis log bahwa operasi tersebut gagal dan mengembalikan error `-EPERM` (Operation not permitted).
+
+```C
+static int xmp_unlink(const char *path) {
+    if (strcmp(path, trash_path) == 0) {
+        write_log("FAILED TO REMOVE TRASH DIRECTORY");
+        return -EPERM;
+    }
+    // Existing unlink code...
+}
+
+static int xmp_rmdir(const char *path) {
+    if (strcmp(path, trash_path) == 0) {
+        write_log("FAILED TO REMOVE TRASH DIRECTORY");
+        return -EPERM;
+    }
+    // Existing rmdir code...
+}
+
+static int xmp_rename(const char *from, const char *to, unsigned int flags) {
+    if (strcmp(from, trash_path) == 0 || strcmp(to, trash_path) == 0) {
+        write_log("FAILED TO RENAME TRASH DIRECTORY");
+        return -EPERM;
+    }
+    // Existing rename code...
+}
+```
+
+*2. Prevent creation of directories named "trash" or "restore"*
+
+Fungsi `xmp_mkdir` memeriksa apakah path yang dimaksud mengandung nama `trash` atau `restore`.
+Jika ya, menulis log bahwa operasi tersebut gagal dan mengembalikan error `-EPERM`.
+
+```C
+static int xmp_mkdir(const char *path, mode_t mode) {
+    if (strstr(path, "/trash") != NULL || strstr(path, "/restore") != NULL) {
+        write_log("FAILED TO CREATE TRASH/RESTORE DIRECTORY");
+        return -EPERM;
+    }
+    return mkdir(path, mode);
+}
+```
+
+*3. Mount the filesystem with FUSE operations*
+
+Mendefinisikan struktur `fuse_operations` dengan fungsi-fungsi yang telah kita definisikan sebelumnya.
+Memanggil `fuse_main` untuk menjalankan filesystem dengan operasi yang telah didefinisikan.
+
+```C
+static struct fuse_operations xmp_oper = {
+    .getattr = xmp_getattr,
+    .readdir = xmp_readdir,
+    .read = xmp_read,
+    .unlink = xmp_unlink,
+    .rmdir = xmp_rmdir,
+    .rename = xmp_rename,
+    .chmod = xmp_chmod,
+    .chown = xmp_chown,
+    .mkdir = xmp_mkdir,
+};
+
+int main(int argc, char *argv[]) {
+    return fuse_main(argc, argv, &xmp_oper, NULL);
+}
+```
+
+*1. Compile the filesystem*
+
+```bash
+gcc -Wall trash.c `pkg-config fuse --cflags --libs` -o trash_fs
+```
+*2. Create and Mount the Filesystem*
+
+```bash
+mkdir /path/to/mountpoint
+mkdir /path/to/trash
+touch /path/to/trash.log
+./trash_fs /path/to/mountpoint
+```
+
+*3. Test the Filesystem*
+
+Create some test files and directories in the mounted filesystem.
+Use rm and rmdir to delete files and directories inside and outside the trash directory.
+Use the mv command to test restoring files and directories from the trash directory.
+Verify that logs are correctly written to trash.log for all actions.
 
 ### Problem 1f
 Catatlah log pada file trash.log. Format untuk tiap baris log adalah YYMMDD-HH:MM:SS KETERANGAN. Format keterangan akan berdasarkan aksi sesuai soal 1f
 
 **Jawab**
 
-[Jawab Disini]
+*1. Include necessary libraries and define paths*
+
+Mengatur versi FUSE yang digunakan (FUSE_USE_VERSION 30).
+Mengimpor pustaka yang dibutuhkan seperti fuse.h, stdio.h, string.h, dll.
+Mendefinisikan trash_path dan log_path sebagai lokasi direktori trash dan file log.
+
+```C
+#define FUSE_USE_VERSION 30
+
+#include <fuse.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <time.h>
+
+static const char *trash_path = "/path/to/trash";
+static const char *log_path = "/path/to/trash.log";
+```
+
+*2. Utility function to write logs*
+Fungsi write_log menulis pesan log ke file trash.log.
+Membuka file trash.log dalam mode append.
+Mendapatkan waktu saat ini dan memformatnya.
+Menulis waktu dan deskripsi log ke file.
+Menutup file log.
+
+```C
+static void write_log(const char *description) {
+    FILE *log_fp = fopen(log_path, "a");
+    if (log_fp == NULL) {
+        return;
+    }
+
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    char time_str[20];
+    strftime(time_str, sizeof(time_str), "%y%m%d-%H:%M:%S", t);
+
+    fprintf(log_fp, "%s %s\n", time_str, description);
+    fclose(log_fp);
+}
+```
+
+*3. Update logging in existing functions*
+Menambahkan logging di dalam fungsi `xmp_unlink`, `xmp_rmdir`, dan `xmp_rename` untuk mencatat aksi yang dilakukan, seperti memindahkan ke trash, merestorasi dari trash, atau gagal melakukan operasi.
+
+```C
+static int xmp_unlink(const char *path) {
+    // Existing code...
+    char description[1024];
+    snprintf(description, sizeof(description), "MOVED %s TO TRASH", path);
+    write_log(description);
+    // Remaining code...
+}
+
+static int xmp_rmdir(const char *path) {
+    // Existing code...
+    char description[1024];
+    snprintf(description, sizeof(description), "MOVED %s TO TRASH", path);
+    write_log(description);
+    // Remaining code...
+}
+
+static int xmp_rename(const char *from, const char *to, unsigned int flags) {
+    // Existing code...
+    char description[1024];
+    if (is_in_trash(from)) {
+        if (strcmp(to, "restore") == 0) {
+            char original_path[1024];
+            mode_t mode;
+            uid_t uid;
+            gid_t gid;
+
+            read_metadata(from, original_path, &mode, &uid, &gid);
+            snprintf(description, sizeof(description), "RESTORED %s FROM TRASH TO %s", from, original_path);
+            write_log(description);
+            // Remaining code...
+        } else {
+            snprintf(description, sizeof(description), "FAILED TO RENAME %s", from);
+            write_log(description);
+            return -EPERM;
+        }
+    } else {
+        snprintf(description, sizeof(description), "MOVED %s TO %s", from, to);
+        write_log(description);
+    }
+    // Remaining code...
+}
+```
+
+*4. Log permission and ownership changes failures*
+
+Fungsi `xmp_chmod` dan `xmp_chown` memeriksa apakah file atau direktori berada di dalam trash.
+Jika ya, menulis log bahwa operasi tersebut gagal dan mengembalikan error `-EPERM`.
+
+```C
+static int xmp_chmod(const char *path, mode_t mode) {
+    if (is_in_trash(path)) {
+        char description[1024];
+        snprintf(description, sizeof(description), "FAILED TO CHMOD %s", path);
+        write_log(description);
+        return -EPERM;
+    }
+    return chmod(path, mode);
+}
+
+static int xmp_chown(const char *path, uid_t uid, gid_t gid) {
+    if (is_in_trash(path)) {
+        char description[1024];
+        snprintf(description, sizeof(description), "FAILED TO CHOWN %s", path);
+        write_log(description);
+        return -EPERM;
+    }
+    return chown(path, uid, gid);
+}
+```
+
+*1. Compile the filesystem*
+
+```bash
+gcc -Wall trash.c `pkg-config fuse --cflags --libs` -o trash_fs
+```
+*2. Create and Mount the Filesystem*
+
+```bash
+mkdir /path/to/mountpoint
+mkdir /path/to/trash
+touch /path/to/trash.log
+./trash_fs /path/to/mountpoint
+```
+
+*3. Test the Filesystem*
+
+Create some test files and directories in the mounted filesystem.
+Use rm and rmdir to delete files and directories inside and outside the trash directory.
+Use the mv command to test restoring files and directories from the trash directory.
+Verify that logs are correctly written to trash.log for all actions.
 
 ### Kendala
 
-[Tulis Disini]
+Lumayan susah dan tidak bisa berjalan dengan benar
 
 ## 2️⃣ Soal 2
 ### Problem 2a
