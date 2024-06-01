@@ -4,7 +4,7 @@
 |    NRP     |      Name      |
 | :--------: | :------------: |
 | 5025221007 | Yehezkiella Felicia Jeis Timbulong |
-| 5025221000 | Student 2 Name |
+| 5025221047 | Muhammad Rayyaan Fatikhahur Rakhim |
 | 5025221103 | Hilmi Fawwaz Sa'ad |
 
 # Praktikum Modul 4 _(Module 4 Lab Work)_
@@ -483,49 +483,483 @@ Catatlah log pada file trash.log. Format untuk tiap baris log adalah YYMMDD-HH:M
 ## 2️⃣ Soal 2
 ### Problem 2a
 Clone direktori target dan buatlah 4 user pada linux dengan username sesuai isi folder pada direktori target (password dibebaskan)
-
 **Jawab**
 
-[Jawab Disini]
+clone target yang berisikan user
+![image](https://github.com/sisop-its-s24/praktikum-modul-4-d04/assets/112644900/3e1a9959-6501-4169-8943-bf846e081929)
+lalu tambahkan user menggunakan
+![image](https://github.com/sisop-its-s24/praktikum-modul-4-d04/assets/112644900/188a0c04-0b4d-45d1-9d36-fa6d04c88aa1)
+sehingga user akan tertambahkan pada bagian Ubuntu/home
+![image](https://github.com/sisop-its-s24/praktikum-modul-4-d04/assets/112644900/177cd3fd-724c-45c4-be35-fb9c23a2d4a8)
 
 ### Problem 2b
 Ketika folder mount point dari fuse yang kalian buat diakses, akan langsung menuju ke dalam target folder yang telah di clone (tidak dimulai dari root)
 
 **Jawab**
-
-[Jawab Disini]
-
+agar folder mount point dari fuse langsung menuju ke dalam target folder yang telah diclone maka kita perlu membuat
+```C
+#define TARGET_DIR "/usr/operating-system/praktikum-modul-4-d04/task-2/target"
+```
+sehingga target directory akan langsung menuju pada target
+![image](https://github.com/sisop-its-s24/praktikum-modul-4-d04/assets/112644900/dd40b7e0-0c53-43e6-b34a-fbe3d9b9864c)
+dan didalam mountpoint akan beriiskan directory target yang sudah diclone sebelumnya
 ### Problem 2c
 Buatlah agar tiap user tidak dapat menambah, mengubah, maupun menghapus folder maupun file dalam folder yang bukan miliknya
 
 **Jawab**
 
-[Jawab Disini]
+agar tiap user tidak dapat menambah, mengubah, maupun menghapus folder maupun file dalam folder yang bukan miliknya, maka kita perlu membuat handler yang membatasi user ketika mengakses directory dari user lain untuk tidak dapat mengutak atik dengan rincian yang telah disebutkan
+
+- membuat directory
+```C
+static int fuse_mkdir(const char *path, mode_t mode) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    int res = mkdir(full_path, mode);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+```
+- menghapus directory
+```C
+static int fuse_rmdir(const char *path) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    int res = rmdir(full_path);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+
+```
+
+- membuat file
+```C
+static int fuse_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    int fd = open(full_path, fi->flags, mode);
+    if (fd == -1)
+        return -errno;
+
+    fi->fh = fd;
+    return 0;
+}
+```
+
+- menghapus file
+```C
+static int fuse_unlink(const char *path) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    int res = unlink(full_path);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+```
+
+- Mengganti nama file atau direktori
+```C
+static int fuse_rename(const char *oldpath, const char *newpath, unsigned int flags) {
+    (void) flags;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_oldpath[PATH_MAX];
+    char full_newpath[PATH_MAX];
+    construct_full_path(oldpath, full_oldpath);
+    construct_full_path(newpath, full_newpath);
+
+    if (!has_access(username, full_oldpath) || !has_access(username, full_newpath))
+        return -EACCES;
+
+    int res = rename(full_oldpath, full_newpath);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+```
+
+- Menulis ke file
+```C
+static int fuse_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    int fd = fi->fh;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    ssize_t res = pwrite(fd, buf, size, offset);
+    if (res == -1)
+        return -errno;
+
+    return res;
+}
+```
+
+- Memotong ukuran file
+```C
+static int fuse_truncate(const char *path, off_t size, struct fuse_file_info *fi) {
+    (void)fi;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    int res = truncate(full_path, size);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+```
+Pada setiap function tersebut selalu terdapat
+```C
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+```
+yang mana akan membatasi user yang tidak memiliki akses agar tidak bisa melakukan operasi seperti yang disebutkan tadi.
+![image](https://github.com/sisop-its-s24/praktikum-modul-4-d04/assets/112644900/3dd01e77-d25f-4d3f-a70f-14438889e47e)
+Contoh apabila user budi mencoba membuat directory pada user cony maka akan muncul pesan bahwa tidak bisa 
+
 
 ### Problem 2d
 Buatlah agar user dapat menambah, mengubah, maupun menghapus folder maupun file dalam folder miliknya
 
 **Jawab**
 
-[Jawab Disini]
+```C
+int has_access(const char *username, const char *path) {
+    char target_dir[PATH_MAX];
+    snprintf(target_dir, PATH_MAX, "%s/%s", TARGET_DIR, username);
+    return strstr(path, target_dir) == path;
+}
+```
+
+- membuat directory
+```C
+static int fuse_mkdir(const char *path, mode_t mode) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    int res = mkdir(full_path, mode);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+```
+- menghapus directory
+```C
+static int fuse_rmdir(const char *path) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    int res = rmdir(full_path);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+
+```
+
+- membuat file
+```C
+static int fuse_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    int fd = open(full_path, fi->flags, mode);
+    if (fd == -1)
+        return -errno;
+
+    fi->fh = fd;
+    return 0;
+}
+```
+
+- menghapus file
+```C
+static int fuse_unlink(const char *path) {
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    int res = unlink(full_path);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+```
+
+- Mengganti nama file atau direktori
+```C
+static int fuse_rename(const char *oldpath, const char *newpath, unsigned int flags) {
+    (void) flags;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_oldpath[PATH_MAX];
+    char full_newpath[PATH_MAX];
+    construct_full_path(oldpath, full_oldpath);
+    construct_full_path(newpath, full_newpath);
+
+    if (!has_access(username, full_oldpath) || !has_access(username, full_newpath))
+        return -EACCES;
+
+    int res = rename(full_oldpath, full_newpath);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+```
+
+- Menulis ke file
+```C
+static int fuse_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    int fd = fi->fh;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    ssize_t res = pwrite(fd, buf, size, offset);
+    if (res == -1)
+        return -errno;
+
+    return res;
+}
+```
+
+- Memotong ukuran file
+```C
+static int fuse_truncate(const char *path, off_t size, struct fuse_file_info *fi) {
+    (void)fi;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+
+    if (!has_access(username, full_path))
+        return -EACCES;
+
+    int res = truncate(full_path, size);
+    if (res == -1)
+        return -errno;
+
+    return 0;
+}
+
+```
+Melalui function
+```C
+int has_access(const char *username, const char *path) {
+    char target_dir[PATH_MAX];
+    snprintf(target_dir, PATH_MAX, "%s/%s", TARGET_DIR, username);
+    return strstr(path, target_dir) == path;
+}
+```
+dan diimplementasikan pada function lainnya akan mengecek status user apakah memiliki akses atau tidak pada directory tersebut.
+![image](https://github.com/sisop-its-s24/praktikum-modul-4-d04/assets/112644900/00b9eb69-3cd1-4dac-b55f-80a816a38db6)
+
 
 ### Problem 2e
 Semua isi file akan ter-encode jika diakses oleh selain user pemilik folder tersebut (menggunakan encoding Base64)
 
 **Jawab**
+```C
+static const char base64_table[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+```
+kita dapat membuat encode 64 dengan inisiasi char base64
+```C
+char *base64_encode(const unsigned char *data, size_t input_length) {
+    char *encoded_data;
+    size_t output_length = 4 * ((input_length + 2) / 3);
+    encoded_data = malloc(output_length + 1);
+    if (encoded_data == NULL) return NULL;
 
-[Jawab Disini]
+    for (size_t i = 0, j = 0; i < input_length;) {
+        uint32_t octet_a = i < input_length ? (unsigned char)data[i++] : 0;
+        uint32_t octet_b = i < input_length ? (unsigned char)data[i++] : 0;
+        uint32_t octet_c = i < input_length ? (unsigned char)data[i++] : 0;
+
+        uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
+
+        encoded_data[j++] = base64_table[(triple >> 3 * 6) & 0x3F];
+        encoded_data[j++] = base64_table[(triple >> 2 * 6) & 0x3F];
+        encoded_data[j++] = base64_table[(triple >> 1 * 6) & 0x3F];
+        encoded_data[j++] = base64_table[(triple >> 0 * 6) & 0x3F];
+    }
+
+    // Pad the output with '=' characters if necessary
+    for (size_t i = 0; i < (3 - input_length % 3) % 3; i++) {
+        encoded_data[output_length - 1 - i] = '=';
+    }
+    encoded_data[output_length] = '\0';
+
+    return encoded_data;
+}
+```
+lalu melalui base64 encode akan diubah data file yang sebelumnya agar ter encode
+
+```C
+// FUSE callback to read data from a file
+static int fuse_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    int fd = fi->fh;
+    struct fuse_context *ctx = fuse_get_context();
+    char *username = get_user_name(ctx->uid);
+
+    ssize_t res = pread(fd, buf, size, offset);
+    if (res == -1)
+        return -errno;
+
+    // If the user is not the owner, encode the data with Base64
+    char full_path[PATH_MAX];
+    construct_full_path(path, full_path);
+    if (!has_access(username, full_path)) {
+        char *encoded_data = base64_encode((unsigned char *)buf, res);
+        if (encoded_data) {
+            memcpy(buf, encoded_data, strlen(encoded_data));
+            free(encoded_data);
+            res = strlen(encoded_data); // Update the result size to encoded data size
+        }
+    }
+
+    return res;
+}
+```
+- Setelah membaca data dari file menggunakan pread, hasilnya disimpan di buffer buf.
+- Jika user yang mengakses file bukanlah pemilik folder (!has_access(username, full_path)), maka data tersebut akan di-encode menggunakan fungsi base64_encode.
+- Data yang sudah di-encode kemudian ditulis kembali ke buffer buf, dan ukuran hasil pembacaan (res) diperbarui dengan ukuran data yang sudah di-encode.
+Namun disini masih belum bisa ketika user lain mengakses file lain atau membaca justru muncul pesan `permission denied`
+![image](https://github.com/sisop-its-s24/praktikum-modul-4-d04/assets/112644900/f66971aa-fa37-4815-b757-296748053bf4)
 
 ### Problem 2f
 Sebaliknya, file akan ter-decode ketika diakses oleh user pemilik folder tersebut
 
 **Jawab**
+```C
+unsigned char *base64_decode(const char *data, size_t input_length, size_t *output_length) {
+    // Jika panjang input bukan kelipatan dari 4, maka data tidak valid untuk Base64, sehingga fungsi mengembalikan NULL.
+    if (input_length % 4 != 0) return NULL;
 
-[Jawab Disini]
+    // Menghitung panjang output yang dihasilkan dari dekode Base64.
+    *output_length = input_length / 4 * 3;
+    if (data[input_length - 1] == '=') (*output_length)--; // Mengurangi panjang jika ada padding '=' di akhir.
+    if (data[input_length - 2] == '=') (*output_length)--;
+
+    // Mengalokasikan memori untuk menyimpan data yang telah di-decode.
+    unsigned char *decoded_data = malloc(*output_length);
+    if (decoded_data == NULL) return NULL;
+
+    // Mengubah setiap 4 karakter Base64 menjadi 3 byte asli.
+    for (size_t i = 0, j = 0; i < input_length;) {
+        // Mengambil nilai setiap sextet (6-bit grup) dari Base64 karakter.
+        uint32_t sextet_a = data[i] == '=' ? 0 & i++ : base64_table[strchr(base64_table, data[i++]) - base64_table];
+        uint32_t sextet_b = data[i] == '=' ? 0 & i++ : base64_table[strchr(base64_table, data[i++]) - base64_table];
+        uint32_t sextet_c = data[i] == '=' ? 0 & i++ : base64_table[strchr(base64_table, data[i++]) - base64_table];
+        uint32_t sextet_d = data[i] == '=' ? 0 & i++ : base64_table[strchr(base64_table, data[i++]) - base64_table];
+
+        // Menggabungkan sextet menjadi triple (3 byte asli).
+        uint32_t triple = (sextet_a << 3 * 6) + (sextet_b << 2 * 6) + (sextet_c << 1 * 6) + (sextet_d << 0 * 6);
+
+        // Memecah triple kembali menjadi byte dan menyimpannya dalam data yang di-decode.
+        if (j < *output_length) decoded_data[j++] = (triple >> 2 * 8) & 0xFF;
+        if (j < *output_length) decoded_data[j++] = (triple >> 1 * 8) & 0xFF;
+        if (j < *output_length) decoded_data[j++] = (triple >> 0 * 8) & 0xFF;
+    }
+
+    // Mengembalikan pointer ke data yang telah di-decode.
+    return decoded_data;
+}
+```
+code ini dapat mengubah data dalam file agar ter decode ketika user tersebut yang mengakses file yang ada dalam akses miliknya
+![image](https://github.com/sisop-its-s24/praktikum-modul-4-d04/assets/112644900/076ea383-f3d2-4c12-a5d8-04bfda9e1f09)
+
 
 ### Kendala
-
-[Tulis Disini]
+- ketika mengerjakan nomer 2e masih belum bisa melakukan encode padahal dari codenya sudah ada, karena ketika dicoba yang muncul justru `permission denied` meskipun hanya melakukan `cat cagedBird.txt` kemungkinan masalah ada pada permission yang membatasi konteks open sehingga user lain tidak dapat membuka file dari user lain
 
 ## 3️⃣ Soal 3
 ### Problem 3a
