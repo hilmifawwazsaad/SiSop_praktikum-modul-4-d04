@@ -138,14 +138,289 @@ Barulah ketika perintah rm atau rmdir digunakan untuk file atau direktori yang b
 
 **Jawab**
 
-[Jawab Disini]
+```C
+#define FUSE_USE_VERSION 30
+
+#include <fuse.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <libgen.h>
+
+static const char *trash_path = "/path/to/trash"; // Set your trash directory path here
+
+static int xmp_getattr(const char *path, struct stat *stbuf)
+{
+    int res;
+    res = lstat(path, stbuf);
+    if (res == -1)
+        return -errno;
+    return 0;
+}
+
+static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+                       off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags)
+{
+    DIR *dp;
+    struct dirent *de;
+    (void)offset;
+    (void)fi;
+    (void)flags;
+    dp = opendir(path);
+    if (dp == NULL)
+        return -errno;
+
+    while ((de = readdir(dp)) != NULL) {
+        struct stat st;
+        memset(&st, 0, sizeof(st));
+        st.st_ino = de->d_ino;
+        st.st_mode = de->d_type << 12;
+        if (filler(buf, de->d_name, &st, 0, 0))
+            break;
+    }
+    closedir(dp);
+    return 0;
+}
+
+static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
+                    struct fuse_file_info *fi)
+{
+    int fd;
+    int res;
+    (void)fi;
+    fd = open(path, O_RDONLY);
+    if (fd == -1)
+        return -errno;
+    res = pread(fd, buf, size, offset);
+    if (res == -1)
+        res = -errno;
+    close(fd);
+    return res;
+}
+
+static int is_in_trash(const char *path)
+{
+    return strncmp(path, trash_path, strlen(trash_path)) == 0;
+}
+
+static int xmp_unlink(const char *path)
+{
+    int res;
+
+    if (is_in_trash(path)) {
+        res = unlink(path);
+        if (res == -1)
+            return -errno;
+    } else {
+        char new_path[1024];
+        snprintf(new_path, sizeof(new_path), "%s%s", trash_path, path);
+        res = rename(path, new_path);
+        if (res == -1)
+            return -errno;
+        chmod(new_path, 0000); // Make the file unreadable, unwritable, unexecutable
+    }
+
+    return 0;
+}
+
+static int xmp_rmdir(const char *path)
+{
+    int res;
+
+    if (is_in_trash(path)) {
+        res = rmdir(path);
+        if (res == -1)
+            return -errno;
+    } else {
+        char new_path[1024];
+        snprintf(new_path, sizeof(new_path), "%s%s", trash_path, path);
+        res = rename(path, new_path);
+        if (res == -1)
+            return -errno;
+        chmod(new_path, 0000); // Make the directory unreadable, unwritable, unexecutable
+    }
+
+    return 0;
+}
+
+static struct fuse_operations xmp_oper = {
+    .getattr = xmp_getattr,
+    .readdir = xmp_readdir,
+    .read = xmp_read,
+    .unlink = xmp_unlink,
+    .rmdir = xmp_rmdir,
+};
+
+int main(int argc, char *argv[])
+{
+    return fuse_main(argc, argv, &xmp_oper, NULL);
+}
+
+```
 
 ### Problem 1c
 File atau direktori yang berada pada direktori trash tidak dapat diubah permission dan kepemilikannya, serta tidak dapat direname
 
 **Jawab**
 
-[Jawab Disini]
+```C
+#define FUSE_USE_VERSION 30
+
+#include <fuse.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <libgen.h>
+
+static const char *trash_path = "/path/to/trash"; // Set your trash directory path here
+
+static int xmp_getattr(const char *path, struct stat *stbuf)
+{
+    int res;
+    res = lstat(path, stbuf);
+    if (res == -1)
+        return -errno;
+    return 0;
+}
+
+static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+                       off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags)
+{
+    DIR *dp;
+    struct dirent *de;
+    (void)offset;
+    (void)fi;
+    (void)flags;
+    dp = opendir(path);
+    if (dp == NULL)
+        return -errno;
+
+    while ((de = readdir(dp)) != NULL) {
+        struct stat st;
+        memset(&st, 0, sizeof(st));
+        st.st_ino = de->d_ino;
+        st.st_mode = de->d_type << 12;
+        if (filler(buf, de->d_name, &st, 0, 0))
+            break;
+    }
+    closedir(dp);
+    return 0;
+}
+
+static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
+                    struct fuse_file_info *fi)
+{
+    int fd;
+    int res;
+    (void)fi;
+    fd = open(path, O_RDONLY);
+    if (fd == -1)
+        return -errno;
+    res = pread(fd, buf, size, offset);
+    if (res == -1)
+        res = -errno;
+    close(fd);
+    return res;
+}
+
+static int is_in_trash(const char *path)
+{
+    return strncmp(path, trash_path, strlen(trash_path)) == 0;
+}
+
+static int xmp_unlink(const char *path)
+{
+    int res;
+
+    if (is_in_trash(path)) {
+        res = unlink(path);
+        if (res == -1)
+            return -errno;
+    } else {
+        char new_path[1024];
+        snprintf(new_path, sizeof(new_path), "%s%s", trash_path, path);
+        res = rename(path, new_path);
+        if (res == -1)
+            return -errno;
+        chmod(new_path, 0000); // Make the file unreadable, unwritable, unexecutable
+    }
+
+    return 0;
+}
+
+static int xmp_rmdir(const char *path)
+{
+    int res;
+
+    if (is_in_trash(path)) {
+        res = rmdir(path);
+        if (res == -1)
+            return -errno;
+    } else {
+        char new_path[1024];
+        snprintf(new_path, sizeof(new_path), "%s%s", trash_path, path);
+        res = rename(path, new_path);
+        if (res == -1)
+            return -errno;
+        chmod(new_path, 0000); // Make the directory unreadable, unwritable, unexecutable
+    }
+
+    return 0;
+}
+
+static int xmp_rename(const char *from, const char *to, unsigned int flags)
+{
+    if (is_in_trash(from))
+        return -EPERM; // Operation not permitted
+    return rename(from, to);
+}
+
+static int xmp_chmod(const char *path, mode_t mode, struct fuse_file_info *fi)
+{
+    (void)fi;
+    if (is_in_trash(path))
+        return -EPERM; // Operation not permitted
+    int res = chmod(path, mode);
+    if (res == -1)
+        return -errno;
+    return 0;
+}
+
+static int xmp_chown(const char *path, uid_t uid, gid_t gid, struct fuse_file_info *fi)
+{
+    (void)fi;
+    if (is_in_trash(path))
+        return -EPERM; // Operation not permitted
+    int res = lchown(path, uid, gid);
+    if (res == -1)
+        return -errno;
+    return 0;
+}
+
+static struct fuse_operations xmp_oper = {
+    .getattr = xmp_getattr,
+    .readdir = xmp_readdir,
+    .read = xmp_read,
+    .unlink = xmp_unlink,
+    .rmdir = xmp_rmdir,
+    .rename = xmp_rename,
+    .chmod = xmp_chmod,
+    .chown = xmp_chown,
+};
+
+int main(int argc, char *argv[])
+{
+    return fuse_main(argc, argv, &xmp_oper, NULL);
+}
+```
 
 ### Problem 1d
 Untuk memulihkan file atau direktori dari direktori trash, anda harus menggunakan perintah mv dengan format mv [path_file_dalam_trash] [arg]. Opsi pertama untuk arg adalah dengan path biasa sehingga file atau direktori akan dipindahkan dari direktori trash ke path tersebut. Opsi kedua untuk arg adalah restore sehingga file atau direktori akan kembali ke path asal sebelum ia dipindah ke trash. Permission untuk file atau direktori yang dipulihkan harus kembali seperti sebelum dimasukkan ke trash. Khusus untuk arg restore anda harus membuat path yang sesuai apabila path asal tidak ada (terhapus/dipindah)
