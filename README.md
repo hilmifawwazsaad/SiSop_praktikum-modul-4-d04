@@ -38,6 +38,7 @@ Pertama, pastikan bahwa FUSE telah terinstal pada sistem.
 sudo apt-get install fuse libfuse-dev
 ```
 *2. Create the filesystem code*
+
 Kode untuk membuat filesystem diletakkan pada trash.c. Menggunakan fungsi getattr, readdir, read, unlink, rmdir, rename, mkdir, chown, dan chmod pada struct fuse_operations.
 
 ```C
@@ -141,6 +142,7 @@ int main(int argc, char *argv[])
 ```
 
 *3. Compile the filesystem*
+
 Compile the `trash.c` file using `gcc`
 
 ```bash
@@ -148,6 +150,7 @@ gcc -Wall trash.c `pkg-config fuse --cflags --libs` -o trash_fs
 ```
 
 *4. Create and Mount the Filesystem*
+
 Create the directories for the filesystem and the trash
 
 ```bash
@@ -162,6 +165,7 @@ Mount the filesystem
 ```
 
 *5. Test the filesystem*
+
 Test the filesystem by creating files and directories, then deleting them using rm and rmdir.
 
 ### Problem 1b
@@ -690,6 +694,7 @@ Direktori trash tidak dapat dihapus, dipindah, direname. Anda juga tidak dapat m
 **Jawab**
 
 *1. Prevent the trash directory from being deleted, moved, or renamed*
+
 Fungsi `xmp_unlink`, `xmp_rmdir`, dan `xmp_rename` memeriksa apakah path yang dimaksud adalah `trash_path`.
 Jika ya, menulis log bahwa operasi tersebut gagal dan mengembalikan error `-EPERM` (Operation not permitted).
 
@@ -810,6 +815,7 @@ static const char *log_path = "/path/to/trash.log";
 ```
 
 *2. Utility function to write logs*
+
 Fungsi write_log menulis pesan log ke file trash.log.
 Membuka file trash.log dalam mode append.
 Mendapatkan waktu saat ini dan memformatnya.
@@ -834,6 +840,7 @@ static void write_log(const char *description) {
 ```
 
 *3. Update logging in existing functions*
+
 Menambahkan logging di dalam fungsi `xmp_unlink`, `xmp_rmdir`, dan `xmp_rename` untuk mencatat aksi yang dilakukan, seperti memindahkan ke trash, merestorasi dari trash, atau gagal melakukan operasi.
 
 ```C
