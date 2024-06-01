@@ -31,7 +31,105 @@ Kode untuk membuat filesystem diletakkan pada trash.c. Anda harus menggunakan fu
 
 **Jawab**
 
-[Jawab Disini]
+```C
+#define FUSE_USE_VERSION 30
+
+#include <fuse.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+static const char *trash_path = "/path/to/trash"; // Set your trash directory path here
+
+static int xmp_getattr(const char *path, struct stat *stbuf)
+{
+    int res;
+    res = lstat(path, stbuf);
+    if (res == -1)
+        return -errno;
+    return 0;
+}
+
+static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+                       off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags)
+{
+    DIR *dp;
+    struct dirent *de;
+    (void)offset;
+    (void)fi;
+    (void)flags;
+    dp = opendir(path);
+    if (dp == NULL)
+        return -errno;
+
+    while ((de = readdir(dp)) != NULL) {
+        struct stat st;
+        memset(&st, 0, sizeof(st));
+        st.st_ino = de->d_ino;
+        st.st_mode = de->d_type << 12;
+        if (filler(buf, de->d_name, &st, 0, 0))
+            break;
+    }
+    closedir(dp);
+    return 0;
+}
+
+static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
+                    struct fuse_file_info *fi)
+{
+    int fd;
+    int res;
+    (void)fi;
+    fd = open(path, O_RDONLY);
+    if (fd == -1)
+        return -errno;
+    res = pread(fd, buf, size, offset);
+    if (res == -1)
+        res = -errno;
+    close(fd);
+    return res;
+}
+
+static int xmp_unlink(const char *path)
+{
+    char new_path[1024];
+    snprintf(new_path, sizeof(new_path), "%s%s", trash_path, path);
+    int res = rename(path, new_path);
+    if (res == -1)
+        return -errno;
+    chmod(new_path, 0000); // Make the file unreadable, unwritable, unexecutable
+    return 0;
+}
+
+static int xmp_rmdir(const char *path)
+{
+    char new_path[1024];
+    snprintf(new_path, sizeof(new_path), "%s%s", trash_path, path);
+    int res = rename(path, new_path);
+    if (res == -1)
+        return -errno;
+    chmod(new_path, 0000); // Make the directory unreadable, unwritable, unexecutable
+    return 0;
+}
+
+static struct fuse_operations xmp_oper = {
+    .getattr = xmp_getattr,
+    .readdir = xmp_readdir,
+    .read = xmp_read,
+    .unlink = xmp_unlink,
+    .rmdir = xmp_rmdir,
+};
+
+int main(int argc, char *argv[])
+{
+    return fuse_main(argc, argv, &xmp_oper, NULL);
+}
+
+```
 
 ### Problem 1b
 Ketika menggunakan perintah rm atau rmdir untuk file atau direktori yang berada diluar direktori trash, maka file atau direktori tersebut akan dipindahkan ke direktori trash dan menjadi tidak dapat diread, write, dan execute baik oleh pemilik, grup, maupun user lainnya
