@@ -3,7 +3,7 @@
 
 |    NRP     |      Name      |
 | :--------: | :------------: |
-| 5025221000 | Student 1 Name |
+| 5025221007 | Yehezkiella Felicia Jeis Timbulong |
 | 5025221000 | Student 2 Name |
 | 5025221103 | Hilmi Fawwaz Sa'ad |
 
@@ -30,6 +30,15 @@ _Write your lab work report here!_
 Kode untuk membuat filesystem diletakkan pada trash.c. Anda harus menggunakan fungsi getattr, readdir, read, unlink, rmdir, rename, mkdir, chown, dan chmod pada struct fuse_operations. Dibebaskan jika ingin menambahkan fungsi lain selain 9 fungsi diatas
 
 **Jawab**
+
+*1. Install FUSE*
+
+Pertama, pastikan bahwa FUSE telah terinstal pada sistem.
+```bash
+sudo apt-get install fuse libfuse-dev
+```
+*2. Create the filesystem code*
+Kode untuk membuat filesystem diletakkan pada trash.c. Menggunakan fungsi getattr, readdir, read, unlink, rmdir, rename, mkdir, chown, dan chmod pada struct fuse_operations.
 
 ```C
 #define FUSE_USE_VERSION 30
@@ -130,6 +139,30 @@ int main(int argc, char *argv[])
 }
 
 ```
+
+*3. Compile the filesystem*
+Compile the `trash.c` file using `gcc`
+
+```bash
+gcc -Wall trash.c `pkg-config fuse --cflags --libs` -o trash_fs
+```
+
+*4. Create and Mount the Filesystem*
+Create the directories for the filesystem and the trash
+
+```bash
+mkdir /path/to/mountpoint
+mkdir /path/to/trash
+```
+
+Mount the filesystem
+
+```bash
+./trash_fs /path/to/mountpoint
+```
+
+*5. Test the filesystem*
+Test the filesystem by creating files and directories, then deleting them using rm and rmdir.
 
 ### Problem 1b
 Ketika menggunakan perintah rm atau rmdir untuk file atau direktori yang berada diluar direktori trash, maka file atau direktori tersebut akan dipindahkan ke direktori trash dan menjadi tidak dapat diread, write, dan execute baik oleh pemilik, grup, maupun user lainnya
